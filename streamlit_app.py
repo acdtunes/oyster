@@ -1099,42 +1099,38 @@ def show_validation():
     
     df = pd.DataFrame(validation_data)
     
-    # Create gauge charts for each metric
-    fig = make_subplots(
-        rows=2, cols=3,
-        specs=[[{'type': 'indicator'}, {'type': 'indicator'}, {'type': 'indicator'}],
-               [{'type': 'indicator'}, {'type': 'indicator'}, {'type': 'indicator'}]],
-        subplot_titles=df['Metric'].tolist()
-    )
+    # Display validation table
+    st.dataframe(df.style.applymap(
+        lambda x: 'background-color: #d4edda' if x == '✅ Pass' else '',
+        subset=['Status']
+    ), use_container_width=True)
     
-    for i, row in df.iterrows():
-        row_pos = i // 3 + 1
-        col_pos = i % 3 + 1
-        
-        # Determine color based on status
-        color = "green" if "Pass" in row['Status'] else "orange"
-        
-        fig.add_trace(
-            go.Indicator(
-                mode="gauge+number+delta",
-                value=row['Observed'],
-                delta={'reference': row['Expected']},
-                gauge={'axis': {'range': [None, row['Expected']*1.5]},
-                       'bar': {'color': color},
-                       'steps': [
-                           {'range': [0, row['Expected']*0.8], 'color': "lightgray"},
-                           {'range': [row['Expected']*0.8, row['Expected']*1.2], 'color': "gray"}],
-                       'threshold': {'line': {'color': "red", 'width': 4},
-                                    'thickness': 0.75,
-                                    'value': row['Expected']}},
-                title={'text': row['Status']}
-            ),
-            row=row_pos, col=col_pos
+    # Create simple metrics display
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Self-Recruitment",
+            "4.4%",
+            "Within expected 1-10%",
+            delta_color="normal"
         )
     
-    fig.update_layout(height=600)
+    with col2:
+        st.metric(
+            "Distance Decay",
+            "r = -0.662",
+            "Strong negative correlation",
+            delta_color="normal"
+        )
     
-    st.plotly_chart(fig, use_container_width=True)
+    with col3:
+        st.metric(
+            "Nearest Neighbor",
+            "100%",
+            "All reefs connected locally",
+            delta_color="normal"
+        )
     
     # Validation summary
     st.markdown("### ✅ Validation Summary")
