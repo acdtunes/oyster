@@ -1,0 +1,45 @@
+================================================================================
+    ST. MARY'S RIVER OYSTER ANALYSIS
+================================================================================
+
+Date: 2025-08-10
+Author: R Analysis Pipeline
+
+
+STUDY AREA
+==========
+Geographic extent: 76.557°W to 76.331°W, 38.088°N to 38.310°N
+Number of reef sites: 28
+Total oyster density: 4314.6
+
+ENVIRONMENTAL CONDITIONS
+========================
+Mean temperature: 16.5°C
+Mean salinity: 11.3 PSU
+Mean current speed: 0.050 m/s
+Mean pH: 8.24
+
+LARVAL DISPERSAL
+================
+High settlement area (>50%): 83.5% of water area
+Mean settlement probability: 0.648
+Mean connectivity: 0.0354
+Self-recruitment: 0.044
+
+KEY REEFS
+=========
+
+Top source reefs:
+  1. STM_04 (Density: 98.6)
+  2. STM_23 (Density: 55.0)
+  3. STM_34 (Density: 94.1)
+  4. STM_06 (Density: 227.2)
+  5. STM_13 (Density: 130.0)
+
+KEY FINDINGS
+============
+• Low current speeds promote local larval retention
+• High-density reefs create settlement hotspots
+• Limited exchange between upper and lower river
+• Excellent conditions for restoration success
+
