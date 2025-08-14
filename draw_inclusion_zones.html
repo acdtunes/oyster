@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Inclusion Zone Drawing Tool</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Leaflet Draw CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        
+        .header p {
+            margin: 5px 0 0 0;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .container {
+            display: flex;
+            height: calc(100vh - 80px);
+        }
+        
+        .sidebar {
+            width: 300px;
+            background: white;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            overflow-y: auto;
+        }
+        
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        
+        .instruction-section {
+            margin-bottom: 25px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .instruction-section h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 16px;
+        }
+        
+        .instruction-section ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .instruction-section li {
+            margin: 5px 0;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 5px 5px 5px 0;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            transition: background 0.3s;
+        }
+        
+        .btn:hover {
+            background: #2980b9;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+        }
+        
+        .btn-success:hover {
+            background: #219a52;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .status-info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .status-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .coordinates {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .reef-legend {
+            background: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 2px solid #e74c3c;
+        }
+        
+        .reef-legend h4 {
+            margin: 0 0 5px 0;
+            color: #e74c3c;
+        }
+        
+        /* Make drawing vertices much smaller */
+        .leaflet-editing-icon {
+            width: 3px !important;
+            height: 3px !important;
+            margin-left: -1.5px !important;
+            margin-top: -1.5px !important;
+            border-radius: 1.5px !important;
+            border: 1px solid #0066cc !important;
+            background: #ffffff !important;
+        }
+        
+        .leaflet-touch-icon {
+            width: 4px !important;
+            height: 4px !important;
+            margin-left: -2px !important;
+            margin-top: -2px !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🗺️ Water Inclusion Zone Drawing Tool</h1>
+        <p>Draw polygons around water areas where oyster larvae can settle</p>
+    </div>
+    
+    <div class="container">
+        <div class="sidebar">
+            <div class="reef-legend">
+                <h4>🗺️ Reef Site Legend</h4>
+                <div style="margin: 10px 0;">
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 16px; height: 16px; border-radius: 50%; background: #4CAF50; border: 2px solid #2E7D32; margin-right: 8px;"></div>
+                        <span><strong>Source</strong> - Net larval exporters</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 16px; height: 16px; border-radius: 50%; background: #2196F3; border: 2px solid #1565C0; margin-right: 8px;"></div>
+                        <span><strong>Sink</strong> - Net larval importers</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 14px; height: 14px; border-radius: 50%; background: #FF9800; border: 2px solid #F57C00; margin-right: 8px;"></div>
+                        <span><strong>Balanced</strong> - Equal import/export</span>
+                    </div>
+                </div>
+                <p style="font-size: 12px; color: #666;">Colors distinct from settlement probability palette</p>
+            </div>
+            
+            <div class="instruction-section">
+                <h3>🎯 How to Draw</h3>
+                <ul>
+                    <li>Use the <strong>polygon tool</strong> in the map toolbar</li>
+                    <li>Click points around water areas</li>
+                    <li>Click the first point again to close the polygon</li>
+                    <li>Use <strong>"✏️ Reopen Last"</strong> to continue adding points</li>
+                    <li>Use <strong>"📝 Edit Vertices"</strong> to delete/insert vertices</li>
+                    <li>Only draw around <strong>WATER AREAS</strong></li>
+                </ul>
+            </div>
+            
+            <div class="instruction-section">
+                <h3>✏️ Vertex Editing</h3>
+                <ul>
+                    <li><strong>Red circles</strong>: Click to delete vertices</li>
+                    <li><strong>Green circles</strong>: Click to insert new vertices</li>
+                    <li>Minimum 3 vertices required for polygon</li>
+                    <li>Click "✅ Done Editing" when finished</li>
+                </ul>
+            </div>
+            
+            <div class="instruction-section">
+                <h3>🗺️ Navigation</h3>
+                <ul>
+                    <li>Zoom: Mouse wheel or +/- buttons</li>
+                    <li>Pan: Click and drag the map</li>
+                    <li>Toggle layers: Use layer control (top right)</li>
+                </ul>
+            </div>
+            
+            <div class="controls">
+                <button class="btn btn-success" onclick="exportZones()">💾 Save Zones</button>
+                <button class="btn" onclick="loadExistingZones()">📂 Load Zones</button>
+                <button class="btn" onclick="reopenLastPolygon()">✏️ Reopen Last</button>
+                <button class="btn" onclick="toggleEditMode()" id="editBtn">📝 Edit Vertices</button>
+                <button class="btn" onclick="cancelContinuing()" style="display: none;" id="cancelBtn">❌ Cancel</button>
+                <button class="btn btn-danger" onclick="clearAll()">🗑️ Clear All</button>
+                <button class="btn" onclick="loadReefs()">🔄 Reload Reefs</button>
+            </div>
+            
+            <div id="status" class="status status-info">
+                Loading existing zones from data folder...
+            </div>
+            
+            <div class="instruction-section">
+                <h3>📍 Current Zones</h3>
+                <div id="zone-count">No zones drawn yet</div>
+                <div id="coordinates" class="coordinates" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Leaflet Draw JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    
+    <script>
+        // Initialize the map centered on St. Mary's River
+        const map = L.map('map').setView([38.18, -76.45], 13);
+        
+        // Add different tile layers
+        const streetMap = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18
+        });
+        
+        const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '© Esri',
+            maxZoom: 18
+        });
+        
+        // Add default layer
+        streetMap.addTo(map);
+        
+        // Layer control
+        const baseMaps = {
+            "Street Map": streetMap,
+            "Satellite": satelliteMap
+        };
+        
+        L.control.layers(baseMaps).addTo(map);
+        
+        // Load reef data from server
+        let reefData = [];
+        
+        // Store drawn layers
+        let drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+        
+        // Edit mode state
+        let editMode = false;
+        let editingLayer = null;
+        
+        // Initialize drawing controls
+        const drawControl = new L.Control.Draw({
+            position: 'topleft',
+            draw: {
+                polygon: {
+                    allowIntersection: false,
+                    drawError: {
+                        color: '#e1e100',
+                        message: '<strong>Error:</strong> shape edges cannot cross!'
+                    },
+                    shapeOptions: {
+                        color: '#0066cc',
+                        fillColor: '#00ccff',
+                        fillOpacity: 0.3,
+                        weight: 3
+                    },
+                    icon: new L.DivIcon({
+                        iconSize: new L.Point(6, 6),
+                        className: 'leaflet-div-icon leaflet-editing-icon'
+                    }),
+                    touchIcon: new L.DivIcon({
+                        iconSize: new L.Point(6, 6),
+                        className: 'leaflet-div-icon leaflet-editing-icon leaflet-touch-icon'
+                    })
+                },
+                rectangle: {
+                    shapeOptions: {
+                        color: '#0066cc',
+                        fillColor: '#00ccff',
+                        fillOpacity: 0.3,
+                        weight: 3
+                    }
+                },
+                circle: false,
+                marker: false,
+                circlemarker: false,
+                polyline: false
+            },
+            edit: {
+                featureGroup: drawnItems,
+                remove: true
+            }
+        });
+        
+        map.addControl(drawControl);
+        
+        // Add reef markers
+        function loadReefs() {
+            // Load reef data from CSV
+            fetch('/load_reefs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.reefs) {
+                    reefData = data.reefs;
+                    
+                    // Add markers to map with different colors based on type
+                    reefData.forEach(reef => {
+                        // Color scheme for reef types
+                        let markerColor, markerFillColor, markerSize;
+                        
+                        switch(reef.Type) {
+                            case 'Source':
+                                markerColor = '#2E7D32';      // Dark green border
+                                markerFillColor = '#4CAF50';  // Light green fill
+                                markerSize = 8;
+                                break;
+                            case 'Sink':
+                                markerColor = '#1565C0';      // Dark blue border
+                                markerFillColor = '#2196F3';  // Light blue fill
+                                markerSize = 8;
+                                break;
+                            case 'Balanced':
+                                markerColor = '#F57C00';      // Dark orange border
+                                markerFillColor = '#FF9800';  // Light orange fill
+                                markerSize = 7;
+                                break;
+                            default:
+                                markerColor = '#424242';      // Dark gray border
+                                markerFillColor = '#757575';  // Light gray fill
+                                markerSize = 6;
+                        }
+                        
+                        const marker = L.circleMarker([reef.Latitude, reef.Longitude], {
+                            radius: markerSize,
+                            fillColor: markerFillColor,
+                            color: markerColor,
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.9
+                        }).addTo(map);
+                        
+                        marker.bindPopup(`<strong>${reef.SourceReef}</strong><br>
+                                         Type: ${reef.Type}<br>
+                                         Lat: ${reef.Latitude.toFixed(5)}<br>
+                                         Lon: ${reef.Longitude.toFixed(5)}`);
+                    });
+                    
+                    console.log('✅ Loaded ' + reefData.length + ' reef sites');
+                } else {
+                    console.warn('Could not load reef data from server');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading reefs:', error);
+            });
+        }
+        
+        // Add click handler for continuing open polylines
+        map.on('click', function(e) {
+            // Check if we're continuing an open polyline
+            if (window.continuingPolyline) {
+                const polylineData = window.continuingPolyline;
+                const newPoint = e.latlng;
+                
+                // Add the new point to coordinates
+                polylineData.coords.push(newPoint);
+                
+                // Update the polyline display
+                polylineData.line.setLatLngs(polylineData.coords);
+                
+                updateStatus(`Added point ${polylineData.coords.length}. Right-click to close polygon.`, 'info');
+            }
+        });
+        
+        // Add right-click handler to close open polylines
+        map.on('contextmenu', function(e) {
+            if (window.continuingPolyline) {
+                const polylineData = window.continuingPolyline;
+                
+                if (polylineData.coords.length >= 3) {
+                    // Remove the temporary polyline
+                    map.removeLayer(polylineData.line);
+                    
+                    // Create a closed polygon
+                    const closedCoords = [...polylineData.coords];
+                    closedCoords.push(polylineData.coords[0]); // Close the polygon
+                    
+                    const polygon = L.polygon(polylineData.coords, {
+                        color: '#0066cc',
+                        fillColor: '#00ccff',
+                        fillOpacity: 0.3,
+                        weight: 3
+                    });
+                    
+                    // Add to drawn items
+                    drawnItems.addLayer(polygon);
+                    
+                    // Clear the continuing state
+                    window.continuingPolyline = null;
+                    
+                    // Hide cancel button
+                    document.getElementById('cancelBtn').style.display = 'none';
+                    
+                    updateZoneCount();
+                    updateStatus(`✅ Polygon closed with ${polylineData.coords.length} points!`, 'success');
+                } else {
+                    updateStatus('Need at least 3 points to close polygon', 'warning');
+                }
+                
+                // Prevent default context menu
+                e.originalEvent.preventDefault();
+                return false;
+            }
+        });
+
+        // Event handlers for drawing
+        map.on(L.Draw.Event.CREATED, function(e) {
+            const layer = e.layer;
+            drawnItems.addLayer(layer);
+            updateZoneCount();
+            updateStatus('Zone created! You can edit or delete it using the toolbar.', 'success');
+        });
+        
+        map.on(L.Draw.Event.EDITED, function(e) {
+            updateZoneCount();
+            updateStatus('Zones updated', 'success');
+        });
+        
+        map.on(L.Draw.Event.DELETED, function(e) {
+            updateZoneCount();
+            updateStatus('Zones deleted', 'warning');
+        });
+        
+        // Utility functions
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status status-${type}`;
+            statusDiv.textContent = message;
+        }
+        
+        function updateZoneCount() {
+            const count = drawnItems.getLayers().length;
+            const countDiv = document.getElementById('zone-count');
+            const coordsDiv = document.getElementById('coordinates');
+            
+            if (count === 0) {
+                countDiv.textContent = 'No zones drawn yet';
+                coordsDiv.style.display = 'none';
+            } else {
+                countDiv.textContent = `${count} zone(s) drawn`;
+                
+                // Show coordinates
+                let coordsText = '';
+                drawnItems.eachLayer(function(layer, index) {
+                    if (layer instanceof L.Polygon || layer instanceof L.Rectangle) {
+                        const coords = layer.getLatLngs()[0];
+                        coordsText += `Zone ${drawnItems.getLayers().indexOf(layer) + 1}:\n`;
+                        coords.forEach((coord, i) => {
+                            coordsText += `  ${i + 1}: [${coord.lng.toFixed(5)}, ${coord.lat.toFixed(5)}]\n`;
+                        });
+                        coordsText += '\n';
+                    }
+                });
+                
+                coordsDiv.textContent = coordsText;
+                coordsDiv.style.display = 'block';
+            }
+        }
+        
+        function exportZones() {
+            const zones = [];
+            
+            drawnItems.eachLayer(function(layer) {
+                if (layer instanceof L.Polygon || layer instanceof L.Rectangle) {
+                    const coords = layer.getLatLngs()[0];
+                    const coordinates = coords.map(coord => [coord.lng, coord.lat]);
+                    
+                    zones.push({
+                        type: 'inclusion',
+                        coordinates: coordinates
+                    });
+                }
+            });
+            
+            if (zones.length === 0) {
+                updateStatus('No zones to export! Draw some polygons first.', 'warning');
+                return;
+            }
+            
+            const exportData = {
+                type: 'inclusion_zones',
+                created: new Date().toISOString(),
+                bounds: {
+                    lon_min: -76.495,
+                    lon_max: -76.4,
+                    lat_min: 38.125,
+                    lat_max: 38.23
+                },
+                zones: zones
+            };
+            
+            // Save to server (data folder)
+            updateStatus('Saving zones to data folder...', 'info');
+            
+            fetch('/save_zones', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(exportData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateStatus(`✅ Saved ${zones.length} zone(s) to ${data.filename}`, 'success');
+                    console.log('💾 Zones saved successfully:', data);
+                } else {
+                    updateStatus(`❌ Error: ${data.message}`, 'warning');
+                    console.error('Error saving zones:', data);
+                }
+            })
+            .catch(error => {
+                console.error('Network error:', error);
+                updateStatus('❌ Could not save to server. Using download instead...', 'warning');
+                
+                // Fallback to download
+                const dataStr = JSON.stringify(exportData, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                const url = URL.createObjectURL(dataBlob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'inclusion_zones.json';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                updateStatus(`📥 Downloaded ${zones.length} zone(s) - manually move to data/ folder`, 'warning');
+            });
+        }
+        
+        function loadExistingZones() {
+            fetch('/load_zones', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.zones && data.zones.length > 0) {
+                    // Clear existing zones first
+                    drawnItems.clearLayers();
+                    
+                    // Add loaded zones to map
+                    data.zones.forEach((zone, index) => {
+                        if (zone.coordinates && zone.coordinates.length > 0) {
+                            // Convert coordinates to LatLng format
+                            const latLngs = zone.coordinates.map(coord => [coord[1], coord[0]]);
+                            
+                            // Create polygon
+                            const polygon = L.polygon(latLngs, {
+                                color: '#0066cc',
+                                fillColor: '#00ccff',
+                                fillOpacity: 0.3,
+                                weight: 3
+                            });
+                            
+                            drawnItems.addLayer(polygon);
+                        }
+                    });
+                    
+                    updateZoneCount();
+                    updateStatus(`✅ Loaded ${data.zones.length} existing zone(s). Use polygon tool to add more.`, 'success');
+                } else {
+                    updateStatus('Ready to draw inclusion zones. Use the polygon tool to start.', 'info');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading zones:', error);
+                updateStatus('Ready to draw inclusion zones. Use the polygon tool to start.', 'info');
+            });
+        }
+        
+        function reopenLastPolygon() {
+            const layers = drawnItems.getLayers();
+            if (layers.length === 0) {
+                updateStatus('No polygons to reopen', 'warning');
+                return;
+            }
+            
+            // Get the last (most recent) polygon
+            const lastLayer = layers[layers.length - 1];
+            
+            if (lastLayer instanceof L.Polygon || lastLayer instanceof L.Rectangle) {
+                // Remove the closed polygon from the map
+                drawnItems.removeLayer(lastLayer);
+                
+                // Get the coordinates (remove the last duplicate point that closes the polygon)
+                let coords = lastLayer.getLatLngs()[0];
+                if (coords.length > 0 && 
+                    coords[0].lat === coords[coords.length - 1].lat && 
+                    coords[0].lng === coords[coords.length - 1].lng) {
+                    coords = coords.slice(0, -1);  // Remove duplicate closing point
+                }
+                
+                // Create an open polyline from the coordinates
+                const openPolyline = L.polyline(coords, {
+                    color: '#0066cc',
+                    weight: 3,
+                    opacity: 0.8
+                });
+                
+                // Add the polyline to the map (but not to drawnItems yet)
+                openPolyline.addTo(map);
+                
+                // Store reference for continuing the line
+                window.continuingPolyline = {
+                    line: openPolyline,
+                    coords: coords
+                };
+                
+                // Show cancel button
+                document.getElementById('cancelBtn').style.display = 'inline-block';
+                
+                updateStatus(`✏️ Polygon reopened with ${coords.length} points. Click to add more points, right-click to close again.`, 'success');
+                updateZoneCount();
+                
+            } else {
+                updateStatus('Last item is not a polygon', 'warning');
+            }
+        }
+        
+        function toggleEditMode() {
+            const layers = drawnItems.getLayers();
+            if (layers.length === 0) {
+                updateStatus('No polygons to edit', 'warning');
+                return;
+            }
+            
+            if (!editMode) {
+                // Enter edit mode
+                editMode = true;
+                editingLayer = layers[layers.length - 1]; // Edit the last polygon
+                
+                // Highlight the polygon being edited
+                editingLayer.setStyle({
+                    color: '#ff7800',
+                    weight: 4,
+                    opacity: 0.9,
+                    fillOpacity: 0.4
+                });
+                
+                // Add vertex markers
+                addVertexMarkers(editingLayer);
+                
+                document.getElementById('editBtn').textContent = '✅ Done Editing';
+                updateStatus('Vertex edit mode: Click red circles to delete, click edges to insert new vertices', 'info');
+            } else {
+                // Exit edit mode
+                exitEditMode();
+            }
+        }
+        
+        function exitEditMode() {
+            if (editingLayer) {
+                // Reset polygon style
+                editingLayer.setStyle({
+                    color: '#0066cc',
+                    fillColor: '#00ccff',
+                    fillOpacity: 0.3,
+                    weight: 3
+                });
+                
+                // Remove vertex markers
+                removeVertexMarkers();
+                
+                editingLayer = null;
+            }
+            
+            editMode = false;
+            document.getElementById('editBtn').textContent = '📝 Edit Vertices';
+            updateStatus('Vertex editing complete', 'success');
+        }
+        
+        function addVertexMarkers(layer) {
+            if (!(layer instanceof L.Polygon)) return;
+            
+            const coords = layer.getLatLngs()[0];
+            window.vertexMarkers = [];
+            window.edgeMarkers = [];
+            
+            // Add vertex markers (red circles for deletion)
+            coords.forEach((coord, index) => {
+                if (index === coords.length - 1) return; // Skip duplicate closing point
+                
+                const marker = L.circleMarker(coord, {
+                    radius: 6,
+                    fillColor: '#ff0000',
+                    color: '#800000',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                
+                marker.vertexIndex = index;
+                marker.on('click', function() {
+                    deleteVertex(index);
+                });
+                
+                marker.bindTooltip(`Delete vertex ${index + 1}`, {permanent: false, direction: 'top'});
+                window.vertexMarkers.push(marker);
+            });
+            
+            // Add edge markers (green circles for insertion)
+            for (let i = 0; i < coords.length - 1; i++) {
+                const coord1 = coords[i];
+                const coord2 = coords[(i + 1) % (coords.length - 1)];
+                
+                // Calculate midpoint
+                const midLat = (coord1.lat + coord2.lat) / 2;
+                const midLng = (coord1.lng + coord2.lng) / 2;
+                
+                const edgeMarker = L.circleMarker([midLat, midLng], {
+                    radius: 4,
+                    fillColor: '#00ff00',
+                    color: '#008000',
+                    weight: 2,
+                    opacity: 0.7,
+                    fillOpacity: 0.6
+                }).addTo(map);
+                
+                edgeMarker.edgeIndex = i;
+                edgeMarker.on('click', function() {
+                    insertVertex(i + 1, midLat, midLng);
+                });
+                
+                edgeMarker.bindTooltip(`Insert vertex here`, {permanent: false, direction: 'top'});
+                window.edgeMarkers.push(edgeMarker);
+            }
+        }
+        
+        function removeVertexMarkers() {
+            if (window.vertexMarkers) {
+                window.vertexMarkers.forEach(marker => map.removeLayer(marker));
+                window.vertexMarkers = [];
+            }
+            if (window.edgeMarkers) {
+                window.edgeMarkers.forEach(marker => map.removeLayer(marker));
+                window.edgeMarkers = [];
+            }
+        }
+        
+        function deleteVertex(index) {
+            if (!editingLayer) return;
+            
+            let coords = editingLayer.getLatLngs()[0];
+            if (coords.length <= 4) { // 3 points + closing point
+                updateStatus('Cannot delete vertex - polygon needs at least 3 vertices', 'warning');
+                return;
+            }
+            
+            // Remove the closing duplicate point, delete the vertex, then re-add closing point
+            coords = coords.slice(0, -1); // Remove closing point
+            coords.splice(index, 1); // Remove the vertex
+            coords.push(coords[0]); // Re-add closing point
+            
+            // Update the polygon
+            editingLayer.setLatLngs(coords);
+            
+            // Refresh vertex markers
+            removeVertexMarkers();
+            addVertexMarkers(editingLayer);
+            
+            updateStatus(`Deleted vertex ${index + 1}. ${coords.length - 1} vertices remaining.`, 'success');
+        }
+        
+        function insertVertex(index, lat, lng) {
+            if (!editingLayer) return;
+            
+            let coords = editingLayer.getLatLngs()[0];
+            coords = coords.slice(0, -1); // Remove closing point
+            coords.splice(index, 0, L.latLng(lat, lng)); // Insert new vertex
+            coords.push(coords[0]); // Re-add closing point
+            
+            // Update the polygon
+            editingLayer.setLatLngs(coords);
+            
+            // Refresh vertex markers
+            removeVertexMarkers();
+            addVertexMarkers(editingLayer);
+            
+            updateStatus(`Inserted new vertex. ${coords.length - 1} vertices total.`, 'success');
+        }
+        
+        function cancelContinuing() {
+            if (window.continuingPolyline) {
+                // Remove the temporary polyline
+                map.removeLayer(window.continuingPolyline.line);
+                
+                // Clear the continuing state
+                window.continuingPolyline = null;
+                
+                // Hide cancel button
+                document.getElementById('cancelBtn').style.display = 'none';
+                
+                updateStatus('Polygon editing cancelled', 'warning');
+                updateZoneCount();
+            }
+        }
+        
+        function clearAll() {
+            if (confirm('Are you sure you want to clear all drawn zones?')) {
+                drawnItems.clearLayers();
+                updateZoneCount();
+                updateStatus('All zones cleared', 'warning');
+            }
+        }
+        
+        // Initialize
+        loadReefs();
+        updateZoneCount();
+        
+        // Auto-load existing zones on page load
+        loadExistingZones();
+        
+        // Set initial bounds to St. Mary's River area
+        map.fitBounds([
+            [38.125, -76.495],  // Southwest
+            [38.23, -76.4]      // Northeast
+        ]);
+        
+        console.log('🗺️ Water Inclusion Zone Drawing Tool Ready!');
+        console.log('📍 Use the polygon tool to draw water areas');
+        console.log('💾 Click "Save Zones" to save to data folder');
+        
+    </script>
+</body>
+</html>

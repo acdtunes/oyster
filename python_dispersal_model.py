@@ -90,10 +90,12 @@ def calculate_advection_diffusion_settlement(reef_data, nc_file='data/109516.nc'
     all_lons = list(reef_data['Longitude']) + all_drift_lons
     all_lats = list(reef_data['Latitude']) + all_drift_lats
     
-    lon_min = min(all_lons) - 0.05  # Add buffer
-    lon_max = max(all_lons) + 0.05
-    lat_min = min(all_lats) - 0.15  # EXPANDED southward to cover more of Chesapeake Bay
-    lat_max = max(all_lats) + 0.05
+    # FORCE geographic limits to cover entire St. Mary's River area
+    # Don't use max/min - just set the boundaries we want
+    lon_min = -76.495  # Eastern boundary
+    lon_max = -76.4    # Western boundary
+    lat_min = 38.125   # Southern boundary  
+    lat_max = 38.23    # Northern boundary
     
     print(f"Grid bounds: lon [{lon_min:.3f}, {lon_max:.3f}], lat [{lat_min:.3f}, {lat_max:.3f}]")
     
