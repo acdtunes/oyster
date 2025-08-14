@@ -219,15 +219,28 @@ def create_settlement_map(reef_metrics):
         sys.path.append('.')
         from python_dispersal_model import calculate_advection_diffusion_settlement
         
-        # Calculate current-based settlement field
+        # Create progress bar and status text for Streamlit
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        def update_progress(progress_pct, message):
+            progress_bar.progress(progress_pct)
+            status_text.text(message)
+        
+        # Calculate current-based settlement field with progress updates
         lon_grid, lat_grid, settlement_prob = calculate_advection_diffusion_settlement(
             reef_data,
             nc_file='data/109516.nc',
             pelagic_duration=21,
             mortality_rate=0.1,
             diffusion_coeff=100,
-            settlement_day=14
+            settlement_day=14,
+            progress_callback=update_progress
         )
+        
+        # Clear progress indicators
+        progress_bar.empty()
+        status_text.empty()
         
         # Create high-resolution meshgrid for visualization
         lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
@@ -235,6 +248,12 @@ def create_settlement_map(reef_metrics):
     except Exception as e:
         # Fallback to simple Gaussian kernels if model fails
         st.warning(f"Using simplified model: {e}")
+        
+        # Clear any progress indicators if they exist
+        if 'progress_bar' in locals():
+            progress_bar.empty()
+        if 'status_text' in locals():
+            status_text.empty()
         
         lon_min = reef_data['Longitude'].min() - 0.05
         lon_max = reef_data['Longitude'].max() + 0.05
@@ -261,6 +280,34 @@ def create_settlement_map(reef_metrics):
     # Create interactive Plotly map
     fig = go.Figure()
     
+    # Load water boundaries for visualization filtering
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from shapely.vectorized import contains
+    import os
+    import json
+    
+    water_geometry = None
+    inclusion_zones = []
+    
+    # Load main water boundary
+    if os.path.exists('data/st_marys_water_boundary.geojson'):
+        try:
+            gdf = gpd.read_file('data/st_marys_water_boundary.geojson')
+            if len(gdf) > 0:
+                water_geometry = gdf.geometry.iloc[0]
+        except:
+            pass
+    
+    # Load inclusion zones
+    if os.path.exists('data/inclusion_zones.json'):
+        try:
+            with open('data/inclusion_zones.json', 'r') as f:
+                data = json.load(f)
+                inclusion_zones = data.get('zones', [])
+        except:
+            pass
+    
     # Flatten arrays for scattermapbox
     lon_flat = lon_mesh.flatten()
     lat_flat = lat_mesh.flatten()
@@ -269,6 +316,12 @@ def create_settlement_map(reef_metrics):
     # Filter out very low probabilities for performance
     threshold = 0.01
     mask = prob_flat > threshold
+    
+    # Apply water boundary filtering if available
+    if water_geometry is not None:
+        water_mask_flat = contains(water_geometry, lon_flat, lat_flat)
+        mask = mask & water_mask_flat
+    
     lon_filtered = lon_flat[mask]
     lat_filtered = lat_flat[mask]
     prob_filtered = prob_flat[mask]
@@ -281,7 +334,7 @@ def create_settlement_map(reef_metrics):
         marker=dict(
             size=3,
             color=prob_filtered,
-            colorscale='YlOrRd',
+            colorscale='YlOrRd',  # Original colorscale
             cmin=0,
             cmax=1,
             opacity=0.8,
