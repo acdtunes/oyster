@@ -354,9 +354,8 @@ def calculate_advection_diffusion_settlement(reef_data, nc_file='data/109516.nc'
             v_mean = v_surface_raw
     
     # Grid bounds for St. Mary's River
-    # Extended 3km to the east: 3km / 111km per degree ≈ 0.027 degrees
     lon_min = -76.495
-    lon_max = -76.373  # Extended from -76.4 to -76.373 (3km eastward)
+    lon_max = -76.4  # Original eastern boundary
     lat_min = 38.125
     lat_max = 38.23
     
