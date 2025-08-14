@@ -1,0 +1,43 @@
+# Large data files
+data/109516.nc
+data/*.nc
+
+# USGS water boundary cache
+data/st_marys_water_boundary.geojson
+data/maryland_water_bodies/
+
+# Output files
+output/
+*.png
+*.jpg
+*.pdf
+
+# R-specific
+.Rhistory
+.RData
+.Rproj.user
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.log

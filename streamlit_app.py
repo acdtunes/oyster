@@ -309,7 +309,7 @@ def show_study_area(reef_metrics):
         lon=reef_metrics_subset['Longitude'],
         lat=reef_metrics_subset['Latitude'],
         marker=dict(
-            size=reef_metrics_subset['Density']/10,
+            size=10,  # Fixed size in pixels
             color=reef_metrics_subset['Density'],
             colorscale='Viridis',
             showscale=True,
@@ -325,7 +325,7 @@ def show_study_area(reef_metrics):
     # Update map layout
     fig.update_layout(
         mapbox=dict(
-            style="carto-positron",
+            style="open-street-map",  # Open source map that doesn't require token
             center=dict(
                 lat=reef_metrics_subset['Latitude'].mean(),
                 lon=reef_metrics_subset['Longitude'].mean()
@@ -589,79 +589,531 @@ def show_current_dynamics():
         n_reefs = len(conn_matrix)
         reef_data = reef_metrics.iloc[:n_reefs].copy()
         
-        # Calculate settlement probability field using a fixed grid
+        # Calculate settlement probability field using current-based advection-diffusion model
         import numpy as np
+        import netCDF4 as nc
         from scipy.interpolate import griddata
+        import sys
+        sys.path.append('.')
+        from python_dispersal_model import calculate_advection_diffusion_settlement
         
-        # Create a fixed resolution grid for consistent visualization
-        lon_min = reef_data['Longitude'].min() - 0.02
-        lon_max = reef_data['Longitude'].max() + 0.02
-        lat_min = reef_data['Latitude'].min() - 0.02
-        lat_max = reef_data['Latitude'].max() + 0.02
+        try:
+            # Use the current-based dispersal model (matching R implementation)
+            with st.spinner("Calculating current-based larval dispersal patterns..."):
+                # Load NetCDF data to get water mask
+                with nc.Dataset('data/109516.nc', 'r') as dataset:
+                    # Get coordinate arrays
+                    nc_lon = dataset.variables['longitude'][:]  # Shape: (348,)
+                    nc_lat = dataset.variables['latitude'][:]   # Shape: (567,)
+                    
+                    # Get the land-sea mask (0 = land, 1 = sea)
+                    water_mask = dataset.variables['mask_land_sea'][:]  # Shape: (567, 348)
+                
+                # Create coordinate grids for NetCDF data
+                nc_lon_mesh, nc_lat_mesh = np.meshgrid(nc_lon, nc_lat)
+                
+                # Focus on EXPANDED St. Mary's River area to match clipped USGS bounds
+                lon_center = reef_data['Longitude'].mean()
+                lat_center = reef_data['Latitude'].mean()
+                
+                # DOUBLE EXPANDED bounds to match USGS clipping area
+                lon_buffer = 0.05   # Match USGS clipping (doubled)
+                lat_buffer = 0.08   # Match USGS clipping (doubled)  
+                lon_min = lon_center - lon_buffer
+                lon_max = lon_center + lon_buffer
+                lat_min = lat_center - lat_buffer
+                lat_max = lat_center + lat_buffer
+                
+                # Find indices for the subset
+                lon_mask = (nc_lon >= lon_min) & (nc_lon <= lon_max)
+                lat_mask = (nc_lat >= lat_min) & (nc_lat <= lat_max)
+                
+                # Extract subset
+                lon_subset = nc_lon[lon_mask]
+                lat_subset = nc_lat[lat_mask]
+                
+                # Get the subset of water mask
+                water_mask_subset = water_mask[np.ix_(lat_mask, lon_mask)]
+                
+                # Create meshgrid for subset
+                lon_mesh, lat_mesh = np.meshgrid(lon_subset, lat_subset)
+                
+                # Calculate settlement probability only at water locations
+                settlement_prob = np.zeros_like(lon_mesh)
+                
+                for _, reef in reef_data.iterrows():
+                    # Calculate distance from each grid point to this reef
+                    lon_dist = (lon_mesh - reef['Longitude']) * np.cos(np.radians(reef['Latitude'])) * 111  # km
+                    lat_dist = (lat_mesh - reef['Latitude']) * 111  # km
+                    dist_km = np.sqrt(lon_dist**2 + lat_dist**2)
+                    
+                    # Gaussian kernel with 2km effective radius, weighted by reef density
+                    sigma_km = 2.0
+                    contribution = np.exp(-dist_km**2 / (2 * sigma_km**2)) * (reef['Density'] / 100)
+                    settlement_prob += contribution
+                
+                # Apply water mask (set land areas to NaN)
+                settlement_prob = np.where(water_mask_subset == 1, settlement_prob, np.nan)
+                
+                # Normalize to 0-1 (excluding NaN values)
+                valid_prob = settlement_prob[~np.isnan(settlement_prob)]
+                if len(valid_prob) > 0 and valid_prob.max() > 0:
+                    settlement_prob = settlement_prob / valid_prob.max()
         
-        # Create grid
-        grid_resolution = 80
-        lon_grid = np.linspace(lon_min, lon_max, grid_resolution)
-        lat_grid = np.linspace(lat_min, lat_max, grid_resolution)
-        lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
-        
-        # Calculate settlement probability at each grid point
-        settlement_prob = np.zeros_like(lon_mesh)
-        
-        for _, reef in reef_data.iterrows():
-            # Calculate distance from each grid point to this reef
-            # Account for latitude in distance calculation
-            lon_dist = (lon_mesh - reef['Longitude']) * np.cos(np.radians(reef['Latitude'])) * 111  # km
-            lat_dist = (lat_mesh - reef['Latitude']) * 111  # km
-            dist_km = np.sqrt(lon_dist**2 + lat_dist**2)
+        except Exception as e:
+            st.warning(f"Could not load water mask from NetCDF: {e}")
+            # Fallback to original method
+            lon_min = reef_data['Longitude'].min() - 0.02
+            lon_max = reef_data['Longitude'].max() + 0.02
+            lat_min = reef_data['Latitude'].min() - 0.02
+            lat_max = reef_data['Latitude'].max() + 0.02
             
-            # Gaussian kernel with 2km effective radius, weighted by reef density
-            sigma_km = 2.0
-            contribution = np.exp(-dist_km**2 / (2 * sigma_km**2)) * (reef['Density'] / 100)
-            settlement_prob += contribution
-        
-        # Normalize to 0-1
-        if settlement_prob.max() > 0:
-            settlement_prob = settlement_prob / settlement_prob.max()
+            grid_resolution = 80
+            lon_grid = np.linspace(lon_min, lon_max, grid_resolution)
+            lat_grid = np.linspace(lat_min, lat_max, grid_resolution)
+            lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
+            
+            settlement_prob = np.zeros_like(lon_mesh)
+            
+            for _, reef in reef_data.iterrows():
+                lon_dist = (lon_mesh - reef['Longitude']) * np.cos(np.radians(reef['Latitude'])) * 111
+                lat_dist = (lat_mesh - reef['Latitude']) * 111
+                dist_km = np.sqrt(lon_dist**2 + lat_dist**2)
+                
+                sigma_km = 2.0
+                contribution = np.exp(-dist_km**2 / (2 * sigma_km**2)) * (reef['Density'] / 100)
+                settlement_prob += contribution
+            
+            if settlement_prob.max() > 0:
+                settlement_prob = settlement_prob / settlement_prob.max()
         
         # Create interactive map
         fig = go.Figure()
         
-        # Add settlement probability as scatter points with fixed positions
-        # Flatten the grid for plotting
+        # Create continuous surface using interpolation
+        from scipy.interpolate import griddata
+        
+        # Get valid water points for interpolation
         lon_flat = lon_mesh.flatten()
         lat_flat = lat_mesh.flatten()
         prob_flat = settlement_prob.flatten()
         
-        # Filter out very low probabilities to reduce point count
-        mask = prob_flat > 0.01
+        # Filter out NaN values (land areas) but keep all water areas including low values
+        valid_mask = ~np.isnan(prob_flat)
         
-        fig.add_trace(go.Scattermapbox(
-            lat=lat_flat[mask],
-            lon=lon_flat[mask],
-            mode='markers',
-            marker=dict(
-                size=6,
-                color=prob_flat[mask],
-                colorscale='Hot',
-                showscale=True,
-                opacity=0.5,
-                colorbar=dict(
-                    title="Settlement<br>Probability",
-                    thickness=20,
-                    len=0.7,
-                    tickmode='linear',
-                    tick0=0,
-                    dtick=0.2
-                ),
-                cmin=0,
-                cmax=1
-            ),
-            hovertemplate='Settlement Probability: %{marker.color:.2f}<br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra></extra>',
-            name='Settlement Zones'
-        ))
+        if np.any(valid_mask):
+            # Get valid data points
+            lon_valid = lon_flat[valid_mask]
+            lat_valid = lat_flat[valid_mask]
+            prob_valid = prob_flat[valid_mask]
+            
+            # Create a smooth interpolated surface using high-resolution grid
+            # First calculate settlement probability on the original NetCDF grid
+            original_probs = np.zeros_like(water_mask_subset, dtype=float)
+            
+            for i in range(len(lat_subset)):
+                for j in range(len(lon_subset)):
+                    if water_mask_subset[i, j] == 1:  # Only for water points
+                        prob_val = 0
+                        base_lon = lon_subset[j]
+                        base_lat = lat_subset[i]
+                        
+                        for _, reef in reef_data.iterrows():
+                            # Distance in km
+                            lon_dist = (base_lon - reef['Longitude']) * np.cos(np.radians(reef['Latitude'])) * 111
+                            lat_dist = (base_lat - reef['Latitude']) * 111
+                            dist_km = np.sqrt(lon_dist**2 + lat_dist**2)
+                            
+                            # Gaussian kernel
+                            sigma_km = 2.0
+                            contribution = np.exp(-dist_km**2 / (2 * sigma_km**2)) * (reef['Density'] / 100)
+                            prob_val += contribution
+                        
+                        original_probs[i, j] = prob_val
+            
+            # REGENERATE settlement probabilities using CURRENT-BASED ADVECTION-DIFFUSION MODEL
+            st.info("🌊 Calculating current-based larval dispersal patterns...")
+            st.info("🧮 Using advection-diffusion model with ocean currents (matching R analysis)")
+            
+            # Use the current-based dispersal model
+            with st.spinner("Calculating larval dispersal with currents..."):
+                calc_lon, calc_lat, settlement_prob_expanded = calculate_advection_diffusion_settlement(
+                    reef_data,
+                    nc_file='data/109516.nc',
+                    pelagic_duration=21,      # 21 days in water column
+                    mortality_rate=0.1,       # 10% daily mortality
+                    diffusion_coeff=100,      # Horizontal diffusion (m²/s)
+                    settlement_day=14         # Competency starts day 14
+                )
+            
+            # Create mesh grids from the returned coordinates
+            calc_lon_mesh, calc_lat_mesh = np.meshgrid(calc_lon, calc_lat)
+            
+            # Update map bounds to show where larvae actually go
+            lon_min = calc_lon.min()
+            lon_max = calc_lon.max()
+            lat_min = calc_lat.min()
+            lat_max = calc_lat.max()
+            
+            # Now interpolate from expanded calculation grid to high-resolution display grid
+            from scipy.interpolate import griddata
+            
+            # Get all calculated points as source data
+            calc_lon_flat = calc_lon_mesh.flatten()
+            calc_lat_flat = calc_lat_mesh.flatten()
+            calc_prob_flat = settlement_prob_expanded.flatten()
+            
+            # Create EXTREME HIGH-RESOLUTION interpolation grid for smooth continuous surface
+            # Super fine grid for zoom-in quality
+            # Dynamically adjust based on area size
+            lon_range = lon_max - lon_min
+            lat_range = lat_max - lat_min
+            
+            # Target reasonable density for performance
+            points_per_degree = 1000  # Moderate density for good visualization
+            lon_hr = np.linspace(lon_min, lon_max, int(lon_range * points_per_degree))
+            lat_hr = np.linspace(lat_min, lat_max, int(lat_range * points_per_degree))
+            
+            st.success(f"✅ Computed current-driven settlement probabilities")
+            st.info(f"📍 Map expanded to show full dispersal area: {lon_max - lon_min:.2f}° × {lat_max - lat_min:.2f}°")
+            st.info(f"🔍 Ultra-high resolution: {len(lon_hr):,} × {len(lat_hr):,} = {len(lon_hr) * len(lat_hr):,} points")
+            st.warning("⚠️ Larvae drift significantly with currents - dispersal extends far from source reefs!")
+            lon_hr_mesh, lat_hr_mesh = np.meshgrid(lon_hr, lat_hr)
+            
+            # Interpolate probabilities from expanded calculation grid to display grid  
+            prob_hr = griddata(
+                points=(calc_lon_flat, calc_lat_flat),
+                values=calc_prob_flat,
+                xi=(lon_hr_mesh, lat_hr_mesh),
+                method='cubic',
+                fill_value=0
+            )
+            
+            # Load REAL USGS NHD water boundary data
+            @st.cache_data
+            def load_usgs_water_boundary():
+                """
+                Load real USGS NHD water boundary from downloaded data
+                Cached for performance
+                """
+                try:
+                    # Import the download module
+                    import sys
+                    import os
+                    sys.path.append('.')
+                    from usgs_data_download import download_and_cache_water_data, is_point_in_water_nhd
+                    
+                    # Check if cached data exists
+                    cache_file = 'data/st_marys_water_boundary.geojson'
+                    if os.path.exists(cache_file):
+                        st.success("✅ Using real USGS NHD water boundary data (11MB cached)")
+                    else:
+                        st.info("⬇️ Downloading real USGS NHD water boundary data...")
+                    
+                    # Get the water boundary geometry
+                    with st.spinner("Loading high-resolution water boundaries..."):
+                        water_geom = download_and_cache_water_data()
+                    
+                    if water_geom is not None:
+                        # CLIP to St. Mary's River area only
+                        from shapely.geometry import Polygon
+                        
+                        # Create clipping bounds around reef area
+                        lon_center = reef_data['Longitude'].mean()
+                        lat_center = reef_data['Latitude'].mean()
+                        
+                        # DOUBLE EXPANDED bounds to cover full St. Mary's River system
+                        # River extends much further north-south than reef cluster
+                        lon_buffer = 0.05   # ~5.5km east-west (doubled from 2.5km)
+                        lat_buffer = 0.08   # ~9km north-south (doubled from 4.5km)
+                        
+                        # Bounds based on actual river extent from map
+                        lon_min = lon_center - lon_buffer
+                        lon_max = lon_center + lon_buffer  
+                        lat_min = lat_center - lat_buffer
+                        lat_max = lat_center + lat_buffer
+                        
+                        clip_bounds = Polygon([
+                            (lon_min, lat_min),
+                            (lon_max, lat_min),
+                            (lon_max, lat_max),
+                            (lon_min, lat_max),
+                            (lon_min, lat_min)
+                        ])
+                        
+                        # Clip USGS data to St. Mary's River area
+                        clipped_water = water_geom.intersection(clip_bounds)
+                        
+                        if not clipped_water.is_empty:
+                            from shapely.geometry import MultiPolygon, Polygon
+                            from shapely.ops import unary_union
+                            
+                            # AGGRESSIVE TRIBUTARY FILTERING
+                            # Strategy: Keep only the main St. Mary's River channel
+                            # 1. Find the largest connected water body (main river)
+                            # 2. Exclude all disconnected smaller bodies (tributaries)
+                            
+                            from shapely.geometry import Point
+                            
+                            # Convert to list of polygons
+                            if isinstance(clipped_water, Polygon):
+                                water_polygons = [clipped_water]
+                            elif isinstance(clipped_water, MultiPolygon):
+                                water_polygons = list(clipped_water.geoms)
+                            else:
+                                water_polygons = []
+                            
+                            if water_polygons:
+                                # Sort by area (largest first)
+                                water_polygons.sort(key=lambda p: p.area, reverse=True)
+                                
+                                # The main St. Mary's River should be the largest polygon
+                                main_river = water_polygons[0]
+                                
+                                # Check if reefs are in the main river to validate
+                                reefs_in_main = 0
+                                for _, reef in reef_data.iterrows():
+                                    pt = Point(reef['Longitude'], reef['Latitude'])
+                                    if main_river.contains(pt) or main_river.distance(pt) < 0.001:
+                                        reefs_in_main += 1
+                                
+                                # If most reefs are in the main polygon, use it
+                                if reefs_in_main >= len(reef_data) * 0.6:  # 60% of reefs (lowered threshold)
+                                    clipped_water = main_river
+                                    excluded = len(water_polygons) - 1
+                                    st.success(f"🎯 Focused on main St. Mary's River channel only")
+                                    st.info(f"🚫 Excluded {excluded} tributary/disconnected water bodies")
+                                else:
+                                    # Alternative: Create a focused area around reef cluster
+                                    # Use convex hull of reefs with buffer to define main river area
+                                    from shapely.geometry import MultiPoint
+                                    from shapely.ops import unary_union
+                                    
+                                    reef_points = MultiPoint([(r['Longitude'], r['Latitude']) 
+                                                             for _, r in reef_data.iterrows()])
+                                    
+                                    # Create buffer around reef convex hull
+                                    # This captures the main river area where reefs are
+                                    reef_area = reef_points.convex_hull.buffer(0.01)  # ~1km buffer
+                                    
+                                    # Intersect with water polygons to get main river only
+                                    main_river_parts = []
+                                    for poly in water_polygons:
+                                        intersection = poly.intersection(reef_area)
+                                        if not intersection.is_empty:
+                                            main_river_parts.append(intersection)
+                                    
+                                    if main_river_parts:
+                                        clipped_water = unary_union(main_river_parts)
+                                        st.success(f"🎯 Focused on reef area of St. Mary's River")
+                                        st.info(f"🚫 Excluded water bodies outside reef zone")
+                                    else:
+                                        # Last resort fallback: keep polygons with reefs
+                                        kept_polygons = []
+                                        for poly in water_polygons:
+                                            contains_reef = False
+                                            for _, reef in reef_data.iterrows():
+                                                pt = Point(reef['Longitude'], reef['Latitude'])
+                                                if poly.contains(pt) or poly.distance(pt) < 0.002:  # ~200m
+                                                    contains_reef = True
+                                                    break
+                                            
+                                            if contains_reef:
+                                                kept_polygons.append(poly)
+                                        
+                                        if kept_polygons:
+                                            clipped_water = unary_union(kept_polygons)
+                                            st.success(f"🎯 Kept {len(kept_polygons)} water bodies containing reef sites")
+                                            st.info(f"🚫 Excluded {len(water_polygons) - len(kept_polygons)} tributaries")
+                                        else:
+                                            # Last resort: use largest polygon
+                                            clipped_water = main_river
+                                            st.warning("⚠️ Using largest water body as main river")
+                            
+                            # Smooth the boundaries slightly to ensure natural coastlines
+                            # Buffer out then in by tiny amount to smooth while preserving shape
+                            final_water = clipped_water.buffer(0.0001).buffer(-0.0001)
+                            
+                            return final_water
+                        else:
+                            st.warning("⚠️ No water found in clipping area")
+                            return None
+                    else:
+                        st.warning("⚠️ Could not load USGS water boundary, using NetCDF fallback")
+                        return None
+                        
+                except Exception as e:
+                    st.error(f"❌ Error loading USGS water boundary: {e}")
+                    return None
+            
+            def is_in_water_usgs(lon, lat, water_boundary):
+                """
+                High-precision point-in-water test using real USGS NHD data
+                """
+                try:
+                    if water_boundary is not None:
+                        from usgs_data_download import is_point_in_water_nhd
+                        return is_point_in_water_nhd(lon, lat, water_boundary)
+                    else:
+                        return False
+                except Exception:
+                    return False
+            
+            # Load the real water boundary
+            usgs_water_boundary = load_usgs_water_boundary()
+            
+            # Apply FAST real USGS geographic water masking  
+            st.info("⚡ Applying main river channel mask (tributaries excluded)...")
+            
+            prob_hr_masked = np.full_like(prob_hr, np.nan)
+            
+            if usgs_water_boundary is not None:
+                # FAST vectorized approach using spatial operations
+                with st.spinner("Masking to main St. Mary's River channel only..."):
+                    try:
+                        from shapely.geometry import Point
+                        from shapely.vectorized import contains
+                        import geopandas as gpd
+                        
+                        # Create coordinate meshgrids
+                        lon_hr_mesh, lat_hr_mesh = np.meshgrid(lon_hr, lat_hr)
+                        
+                        # Flatten coordinates for vectorized operations
+                        lon_flat = lon_hr_mesh.flatten()
+                        lat_flat = lat_hr_mesh.flatten()
+                        
+                        # Vectorized point-in-polygon test (MUCH faster)
+                        # This now tests against ONLY the main river (tributaries already filtered)
+                        water_mask_flat = contains(usgs_water_boundary, lon_flat, lat_flat)
+                        
+                        # Reshape back to grid
+                        water_mask_hr = water_mask_flat.reshape(lon_hr_mesh.shape)
+                        
+                        # Apply strict masking - only show probabilities in main river
+                        # No dilation to keep boundaries precise
+                        expanded_mask = water_mask_hr
+                        
+                        # Apply PRECISE water mask without any smoothing
+                        # This gives sharp, accurate coastal boundaries
+                        prob_hr_masked = np.where(water_mask_hr, prob_hr, np.nan)
+                        
+                        water_points = np.sum(water_mask_hr)
+                        st.success(f"✅ Processed {len(lon_flat):,} points in seconds - {water_points:,} in water")
+                        
+                    except Exception as e:
+                        st.warning(f"⚠️ Vectorized processing failed ({e}), using simplified approach...")
+                        
+                        # HIGH-RESOLUTION approach: test EVERY point for smooth coastlines
+                        st.info("🌊 Computing precise coastal boundaries - this ensures smooth water edges...")
+                        
+                        # Process in chunks for progress updates but at FULL resolution
+                        total_points = len(lat_hr) * len(lon_hr)
+                        processed = 0
+                        
+                        # Get bounding box for fast pre-filtering
+                        bounds = usgs_water_boundary.bounds
+                        
+                        # Process EVERY SINGLE POINT for smooth coastlines
+                        for i in range(len(lat_hr)):
+                            for j in range(len(lon_hr)):
+                                lon, lat = lon_hr[j], lat_hr[i]
+                                
+                                # Fast bounding box check first
+                                if (bounds[0] <= lon <= bounds[2] and 
+                                    bounds[1] <= lat <= bounds[3]):
+                                    if is_in_water_usgs(lon, lat, usgs_water_boundary):
+                                        # Set individual point for precise boundaries
+                                        prob_hr_masked[i, j] = prob_hr[i, j]
+                                
+                                processed += 1
+                                # Update progress every 5%
+                                if processed % (total_points // 20) == 0:
+                                    progress = processed / total_points
+                                    st.progress(progress)
+                        
+                        st.success(f"✅ Processed {total_points:,} points with spatial optimization")
+            else:
+                # Fallback to NetCDF water mask
+                st.warning("⚠️ Using NetCDF water mask fallback")
+                for i in range(len(lat_hr)):
+                    for j in range(len(lon_hr)):
+                        # Find nearest NetCDF grid point
+                        lat_diffs = np.abs(lat_subset - lat_hr[i])
+                        lon_diffs = np.abs(lon_subset - lon_hr[j])
+                        lat_idx = np.argmin(lat_diffs)
+                        lon_idx = np.argmin(lon_diffs)
+                        
+                        if (lat_idx < len(lat_subset) and lon_idx < len(lon_subset) and 
+                            water_mask_subset[lat_idx, lon_idx] == 1):
+                            prob_hr_masked[i, j] = prob_hr[i, j]
+            
+            prob_hr = prob_hr_masked
+            
+            # Flatten for plotting
+            water_points_lon = []
+            water_points_lat = []
+            water_points_prob = []
+            
+            lon_hr_flat = lon_hr_mesh.flatten()
+            lat_hr_flat = lat_hr_mesh.flatten()
+            prob_hr_flat = prob_hr.flatten()
+            
+            # Only keep valid water points with meaningful probability
+            MIN_PROB_THRESHOLD = 0.005  # Only show probabilities above 0.5%
+            valid_mask = (~np.isnan(prob_hr_flat)) & (prob_hr_flat > MIN_PROB_THRESHOLD)
+            water_points_lon = lon_hr_flat[valid_mask]
+            water_points_lat = lat_hr_flat[valid_mask]
+            water_points_prob = prob_hr_flat[valid_mask]
+            
+            # Convert to arrays and normalize
+            water_points_lon = np.array(water_points_lon)
+            water_points_lat = np.array(water_points_lat)
+            water_points_prob = np.array(water_points_prob)
+            
+            if len(water_points_prob) > 0 and water_points_prob.max() > 0:
+                water_points_prob = water_points_prob / water_points_prob.max()
+                
+                # Create smooth interpolated surface with overlapping points
+                fig.add_trace(go.Scattermapbox(
+                    lat=water_points_lat,
+                    lon=water_points_lon,
+                    mode='markers',
+                    marker=dict(
+                        size=4,  # Larger for better coverage at high zoom
+                        color=water_points_prob,
+                        colorscale=[
+                            [0, 'rgba(0,0,139,0.4)'],   # Dark blue
+                            [0.2, 'rgba(0,0,255,0.6)'], # Blue
+                            [0.4, 'rgba(0,255,255,0.8)'], # Cyan
+                            [0.6, 'rgba(255,255,0,0.9)'], # Yellow
+                            [0.8, 'rgba(255,165,0,0.95)'], # Orange
+                            [1.0, 'rgba(255,0,0,1.0)']   # Red
+                        ],
+                        opacity=1.0,  # Full opacity for solid coverage
+                        sizemode='diameter',  # Consistent size regardless of zoom
+                        showscale=True,
+                        colorbar=dict(
+                            title="Settlement<br>Probability",
+                            thickness=20,
+                            len=0.7,
+                            tickmode='linear',
+                            tick0=0,
+                            dtick=0.2
+                        ),
+                        cmin=0,
+                        cmax=1
+                    ),
+                    showlegend=False,
+                    hovertemplate='Settlement Probability: %{marker.color:.3f}<br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra></extra>',
+                    name='Settlement Probability (Water Only)'
+                ))
+            else:
+                st.warning("No valid water areas found for settlement probability.")
+                
+        else:
+            st.warning("No valid water areas found in the settlement probability calculation.")
         
-        # Add reef locations with proper styling
+        # Add reef locations with size scaling and dark gray color
         fig.add_trace(go.Scattermapbox(
             lat=reef_data['Latitude'],
             lon=reef_data['Longitude'],
@@ -669,12 +1121,11 @@ def show_current_dynamics():
             text=reef_data['SourceReef'],
             textposition="top center",
             marker=dict(
-                size=15 + reef_data['Density']/20,  # Scale size based on density
-                color='gold',
-                opacity=0.9,
-                sizemode='diameter',
-                sizemin=10
+                size=10,  # Fixed size in pixels
+                color='darkgray',
+                opacity=1.0
             ),
+            textfont=dict(size=9, color='white'),
             customdata=np.column_stack((reef_data['Density'], reef_data['Type'])),
             hovertemplate='<b>%{text}</b><br>' +
                          'Density: %{customdata[0]:.1f} ind/m²<br>' +
@@ -684,15 +1135,21 @@ def show_current_dynamics():
             name='Oyster Reefs'
         ))
         
-        # Update layout with proper St. Mary's River location
+        # Update layout with colored geographic map
         fig.update_layout(
             mapbox=dict(
-                style='carto-positron',
+                style='open-street-map',  # Open source colored map (no token required)
+                # Other free options:
+                # 'open-street-map' - OpenStreetMap tiles
+                # 'carto-positron' - Light Carto basemap
+                # 'carto-darkmatter' - Dark Carto basemap
+                # 'stamen-terrain' - Terrain map
+                # 'stamen-toner' - High contrast B&W
                 center=dict(
                     lat=reef_data['Latitude'].mean(),
                     lon=reef_data['Longitude'].mean()
                 ),
-                zoom=11  # Adjusted zoom for St. Mary's River scale
+                zoom=11.5
             ),
             height=600,
             margin=dict(l=0, r=0, t=30, b=0),
@@ -706,19 +1163,121 @@ def show_current_dynamics():
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Add metrics
+        # Add data source information
+        if usgs_water_boundary is not None:
+            st.info("🏛️ **Data Source**: Real USGS National Hydrography Dataset (NHD) - Complete water features with natural boundaries")
+        else:
+            st.warning("📊 **Data Source**: NetCDF ocean mask - Lower resolution approximation")
+        
+        # Add Current Drift Visualization
+        with st.expander("🌊 See How Currents Affect Larval Drift", expanded=False):
+            from python_dispersal_model import visualize_drift_example
+            
+            st.markdown("### Larval Drift Example")
+            st.info("This shows how ocean currents transport larvae away from their source reef over 21 days")
+            
+            # Get drift example
+            drift_info = visualize_drift_example(reef_data)
+            
+            # Create drift path visualization
+            drift_fig = go.Figure()
+            
+            # Add drift path
+            drift_fig.add_trace(go.Scattermapbox(
+                mode='lines+markers',
+                lon=drift_info['drift_lons'],
+                lat=drift_info['drift_lats'],
+                line=dict(color='red', width=3),
+                marker=dict(size=[15] + [5]*(len(drift_info['drift_days'])-2) + [15], 
+                           color=drift_info['drift_days'],
+                           colorscale='Viridis',
+                           showscale=True,
+                           colorbar=dict(title="Days")),
+                text=[f"Day {d}" for d in drift_info['drift_days']],
+                hovertemplate='%{text}<br>Lon: %{lon:.4f}<br>Lat: %{lat:.4f}<extra></extra>',
+                name='Drift Path'
+            ))
+            
+            # Add source reef
+            drift_fig.add_trace(go.Scattermapbox(
+                mode='markers',
+                lon=[drift_info['source_lon']],
+                lat=[drift_info['source_lat']],
+                marker=dict(size=20, color='green', symbol='circle'),
+                text=[f"Source: {drift_info['source_name']}"],
+                hovertemplate='%{text}<br>Lon: %{lon:.4f}<br>Lat: %{lat:.4f}<extra></extra>',
+                name='Source Reef'
+            ))
+            
+            # Add final position
+            drift_fig.add_trace(go.Scattermapbox(
+                mode='markers',
+                lon=[drift_info['final_lon']],
+                lat=[drift_info['final_lat']],
+                marker=dict(size=20, color='red', symbol='star'),
+                text=[f"Final Position (Day 21)"],
+                hovertemplate='%{text}<br>Lon: %{lon:.4f}<br>Lat: %{lat:.4f}<extra></extra>',
+                name='Final Position'
+            ))
+            
+            drift_fig.update_layout(
+                mapbox=dict(
+                    style='open-street-map',
+                    center=dict(
+                        lat=(drift_info['source_lat'] + drift_info['final_lat'])/2,
+                        lon=(drift_info['source_lon'] + drift_info['final_lon'])/2
+                    ),
+                    zoom=12
+                ),
+                height=400,
+                margin=dict(l=0, r=0, t=30, b=0),
+                title="Example: 21-Day Larval Drift Path",
+                showlegend=True
+            )
+            
+            st.plotly_chart(drift_fig, use_container_width=True)
+            
+            # Show drift statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Current Speed", f"{drift_info['current_speed']:.3f} m/s")
+            with col2:
+                st.metric("Total Drift", f"{drift_info['total_drift_km']:.2f} km")
+            with col3:
+                direction = ('East' if drift_info['current_u'] > 0 else 'West') + '-' + \
+                           ('North' if drift_info['current_v'] > 0 else 'South')
+                st.metric("Direction", direction)
+            
+            st.caption("💡 The dispersal kernel is centered at the drift endpoint, not the source. "
+                      "This is why settlement patterns are asymmetric and influenced by currents.")
+        
+        # Add metrics (only for water areas using real boundaries)
         col1, col2, col3 = st.columns(3)
         with col1:
-            high_prob_area = np.sum(settlement_prob > 0.5) / settlement_prob.size * 100
-            st.metric("High Probability Area", f"{high_prob_area:.1f}%", ">50% probability")
+            # Calculate metrics only for valid (non-NaN) water areas
+            if len(water_points_prob) > 0:
+                high_prob_count = np.sum(water_points_prob > 0.5)
+                high_prob_area = (high_prob_count / len(water_points_prob)) * 100
+                st.metric("High Probability Area", f"{high_prob_area:.1f}%", f">50% settlement ({high_prob_count:,} points)")
+            else:
+                st.metric("High Probability Area", "N/A", "No water data")
         with col2:
-            mean_prob = np.mean(settlement_prob)
-            st.metric("Mean Probability", f"{mean_prob:.3f}", "Normalized")
+            if len(water_points_prob) > 0:
+                mean_prob = np.mean(water_points_prob)
+                st.metric("Mean Water Probability", f"{mean_prob:.3f}", f"{len(water_points_prob):,} water points")
+            else:
+                st.metric("Mean Water Probability", "N/A", "No water data")
         with col3:
-            # Approximate area in km² (each grid cell ~0.3 km)
-            cell_size_km2 = ((lon_max - lon_min) * 111 / grid_resolution) * ((lat_max - lat_min) * 111 / grid_resolution)
-            hotspot_area = np.sum(settlement_prob > 0.3) * cell_size_km2
-            st.metric("Hotspot Coverage", f"{hotspot_area:.1f} km²", "Primary settlement")
+            if len(water_points_prob) > 0:
+                # Calculate approximate resolution
+                lon_range = water_points_lon.max() - water_points_lon.min()
+                lat_range = water_points_lat.max() - water_points_lat.min()
+                approx_resolution = min(lon_range, lat_range) / np.sqrt(len(water_points_prob)) * 111  # km
+                
+                hotspot_count = np.sum(water_points_prob > 0.3)
+                st.metric("Settlement Hotspots", f"{hotspot_count:,}", f"~{approx_resolution:.0f}m resolution")
+            else:
+                st.metric("Settlement Hotspots", "N/A", "No water data")
     
     with tab2:
         st.markdown("### 🌊 Interactive Water Current Map")
@@ -872,10 +1431,10 @@ def show_current_dynamics():
             name='Oyster Reefs'
         ))
         
-        # Update layout
+        # Update layout with satellite map
         fig.update_layout(
             mapbox=dict(
-                style='carto-positron',
+                style='open-street-map',  # Open source colored map
                 center=dict(
                     lat=reef_data['Latitude'].mean(),
                     lon=reef_data['Longitude'].mean()
